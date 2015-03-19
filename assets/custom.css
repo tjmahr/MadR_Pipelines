@@ -1,0 +1,8 @@
+.reveal table {
+	margin-left: auto;
+	margin-right: auto;
+}
+
+.reveal table th, .reveal table td {
+	text-align: right;
+}
