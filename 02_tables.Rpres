@@ -1,0 +1,318 @@
+Bonus Slides: Making pretty regression tables with pipes
+========================================================
+autosize: true
+author: Tristan Mahr, @tjmahr
+date: March 18, 2015
+css: assets/custom.css
+
+Madison R Users Group
+
+Repository for this talk: https://github.com/tjmahr/MadR_Pipelines
+
+```{r, echo = FALSE}
+options(
+  width = 45,
+  dplyr.width = 44,
+  dplyr.print_min = 4,
+  dplyr.print_max = 4)
+```
+
+
+
+Plan
+========================================================
+
+Earlier, I [covered pipelines][magrittr_talk].
+
+Then, I [used pipelines with dplyr][dplyr_talk].
+
+Now, I will demonstrate off how I use pipelines to make
+pretty-printed regression tables.
+
+```{r}
+library("magrittr")
+library("dplyr")
+library("broom")
+library("stringr")
+library("knitr")
+```
+
+
+[magrittr_talk]: http://rpubs.com/tjmahr/pipelines_2015
+[dplyr_talk]: http://rpubs.com/tjmahr/dplyr_2015
+
+
+linear regression
+========================================================
+title: false
+
+I want to print a regression summary table.
+
+```{r}
+model <- lm(Sepal.Length ~ Sepal.Width, iris)
+summary(model)
+```
+
+
+
+broom::tidy
+========================================================
+
+`broom`'s `tidy` function extracts summary values into a data-frame.
+
+```{r}
+m_table <- tidy(model)
+m_table %>% print(digits = 3)
+```
+
+
+
+knitr::kable
+========================================================
+
+`knitr`'s `kable` function prints a data-frame as a Markdown table,
+which rmarkdown/pandoc can convert to HTML or Word.
+
+```{r, eval = FALSE}
+kable(m_table, digits = 3,
+      col.names = c("Param", "B", "SE", "t", "p"))
+```
+
+Raw Markdown output
+
+```
+`r kable(m_table, digits = 3,
+      col.names = c("Param", "B", "SE", "t", "p"))`
+```
+
+
+
+========================================================
+title: false
+
+Which renders as:
+
+```{r}
+kable(m_table, digits = 3,
+      col.names = c("Param", "B", "SE", "t", "p"))
+```
+
+
+
+Almost there
+========================================================
+incremental: true
+
+Two more things that I want.
+
+1. APA style for printing numbers
+    * Two digits of precision for estimates, errors and statistics.
+    * Three digits for p-values.
+    * Bounded values (correlations, p-values) don't need leading zero.
+    * Tiny p-values should not be 0.000. Use `< .001` instead.
+2. Flexibility for many related models. (I don't know the
+   final in-text model beforehand.)
+
+
+
+Approach
+========================================================
+incremental: true
+
+- Build a set of generic, reusable functions for formatting numbers.
+- Make a custom pipeline to format the `term` column.
+- Assemble a pipeline to convert a model into a pretty table.
+
+
+
+Digit Formatters
+========================================================
+
+The `formatC` function is big and confusing, but after I
+figured out something that works well enough, I extracted a
+function. Now I don't have to worry about solving that
+problem again.
+
+```{r}
+# Print with n digits of precision
+fixed_digits <- function(xs, n = 2) {
+  formatC(xs, digits = n, format = "f")
+}
+
+# Want .100 to print with two digits
+c(1000.012, 0.0001, 0.100) %>% fixed_digits(2)
+```
+
+
+
+Remove leading zeros
+========================================================
+
+Here I do a sanity check to see if this operation is necessary.
+
+```{r}
+# Don't print leading zero on bounded numbers.
+remove_leading_zero <- function(xs) {
+  # Problem if any value is greater than 1.0
+  digit_matters <- xs %>% as.numeric %>%
+    abs %>% is_greater_than(1)
+  if (any(digit_matters)) {
+    warning("Non-zero leading digit")
+  }
+  str_replace(xs, "^(-?)0", "\\1")
+}
+c(1.00, -0.12,  0.87, 0.82) %>% remove_leading_zero
+```
+
+
+
+p-value formatter
+========================================================
+
+I format p-values with the previous two functions and overwrite the
+really small ones with the `< .001` template.
+
+```{r}
+# Print three digits of a p-value, but use
+# the "< .001" notation on tiny values.
+format_pval <- function(ps, html = FALSE) {
+  tiny <- ifelse(html, "&lt;&nbsp;.001", "< .001")
+  ps_chr <- ps %>% fixed_digits(3) %>%
+    remove_leading_zero
+  ps_chr[ps < 0.001] <- tiny
+  ps_chr
+}
+m_table$p.value %>% format_pval
+```
+
+
+
+Renaming variables
+=======================================================
+
+A few packages already solve the pretty-table problem--stargazer,
+texreg, xtable--and they do amazing things. But their functions
+usually  rely on an argument where you can specify custom labels
+for the regression predictors. This is fine for one-off tables.
+
+When I have a bunch of related models, I prefer to use a
+string-manipulation pipeline to convert R names into long-hand names.
+
+
+
+Renaming variables
+=======================================================
+
+```{r}
+fix_names <- . %>%
+  str_replace(".Intercept.", "Intercept") %>%
+  str_replace("Species", "") %>%
+  # Capitalize species names
+  str_replace("setosa", "Setosa") %>%
+  str_replace("versicolor", "Versicolor") %>%
+  str_replace("virginica", "Virginica") %>%
+  # Clean up special characters
+  str_replace_all(".Width", " Width") %>%
+  str_replace_all(".Length", " Length") %>%
+  str_replace_all(":", " x ")
+```
+
+
+
+Formatting pipeline
+=======================================================
+
+1. Format the numbers
+2. Rename the terms
+3. Rename the column headings
+
+```{r}
+two_digits <- . %>% fixed_digits(2)
+table_names <- c("Parameter", "Estimate", "SE",
+                 "_t_", "_p_")
+
+format_model_table <- . %>%
+  mutate_each(funs(two_digits),
+              -term, -p.value) %>%
+  mutate(term = fix_names(term),
+         p.value = format_pval(p.value)) %>%
+  set_colnames(table_names)
+```
+
+
+
+Overall pipeline
+=======================================================
+
+1. Fit a model
+2. Extract values for summary table
+3. Format table
+4. Print as markdown
+
+```{r, eval = FALSE}
+lm(..., iris) %>%
+  tidy %>%
+  format_model_table %>%
+  kable
+```
+
+
+========================================================
+title: false
+
+```{r, results = 'asis'}
+lm(Sepal.Length ~ Sepal.Width, iris) %>%
+  tidy %>%
+  format_model_table %>%
+  kable(align = "r")
+```
+
+
+
+========================================================
+title: false
+
+```{r, results = 'asis'}
+lm(Sepal.Length ~ Species * Sepal.Width, iris) %>%
+  tidy %>%
+  format_model_table %>%
+  kable(align = "r")
+```
+
+========================================================
+title: false
+
+
+```{r, results = 'asis'}
+lm(Sepal.Length ~ Petal.Length * Species, iris) %>%
+  tidy %>%
+  format_model_table %>%
+  kable(align = "r")
+```
+
+
+
+========================================================
+title: false
+
+```{r, results = 'asis'}
+lm(Sepal.Length ~ Species * Sepal.Width + Petal.Length, iris) %>%
+  tidy %>%
+  format_model_table %>%
+  kable(align = "r")
+```
+
+
+========================================================
+title: false
+
+```{r, results = 'asis'}
+lm(Sepal.Length ~ Species * Sepal.Width * Petal.Length, iris) %>%
+  tidy %>%
+  format_model_table %>%
+  kable(align = "r")
+```
+
+
+
+
