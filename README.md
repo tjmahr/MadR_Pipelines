@@ -21,7 +21,7 @@ eye-tracking and speech perception data. [@tjmahr](https://twitter.com/tjmahr),
 I prepared three sets of slides:
 
 * [Pipelines in R](http://rpubs.com/tjmahr/pipelines_2015)
-* [dplyr: verbs for manipulating data-frames](http://rpubs.com/tjmahr/pipelines_2015)
+* [dplyr: verbs for manipulating data-frames](http://rpubs.com/tjmahr/dplyr_2015)
 * [Making pretty regression tables with pipes](http://rpubs.com/tjmahr/prettytables_2015)
 
 
